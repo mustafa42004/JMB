@@ -1,0 +1,5 @@
+/node_modules
+/JBM_Server/node_modules
+/JBM_Server/.env
+
+.env

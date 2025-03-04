@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "JMB-App",
+    "slug": "JMB-App",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/jmb.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/jmb.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/jmb.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.sadiq_53.JMBApp"
+    },
+    "web": {
+      "favicon": "./assets/jmb.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "c20ac63d-dd46-4797-891b-562f44d736b5"
+      }
+    }
+  }
+}
