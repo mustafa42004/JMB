@@ -347,27 +347,27 @@ const DataListContent = (props) => {
                               return (
                                 <tr key={index}>
                                   <td className="sorting_1">{index + 1}</td>
-                                  <td className="sorting_1">{value.AGREEMENTNO}</td>
-                                  <td className="sorting_1">{value.CUSTOMERNAME}</td>
-                                  <td className="sorting_1">{value.BRANCH}</td>
-                                  <td className="sorting_1">{value.REGDNUM}</td>
-                                  <td className="sorting_1">{value.CHASISNUM}</td>
-                                  <td className="sorting_1">{value.ENGINENUM}</td>
-                                  <td className="sorting_1">{value.MANUFACTURERDESC}</td>
-                                  <td className="sorting_1">{value.MAKE}</td>
-                                  <td className="sorting_1">{value.MODELNUM}</td>
-                                  <td className="sorting_1">{value.ASSETDESC}</td>
+                                  <td className="sorting_1">{value?.AGREEMENTNO}</td>
+                                  <td className="sorting_1">{value?.CUSTOMERNAME}</td>
+                                  <td className="sorting_1">{value?.BRANCH}</td>
+                                  <td className="sorting_1">{value?.REGDNUM}</td>
+                                  <td className="sorting_1">{value?.CHASISNUM}</td>
+                                  <td className="sorting_1">{value?.ENGINENUM}</td>
+                                  <td className="sorting_1">{value?.MANUFACTURERDESC}</td>
+                                  <td className="sorting_1">{value?.MAKE}</td>
+                                  <td className="sorting_1">{value?.MODELNUM}</td>
+                                  <td className="sorting_1">{value?.ASSETDESC}</td>
                                   <td className="sorting_1">{ARMNAME}</td>
-                                  <td className="sorting_1">{value.ARMPHONE ? value.ARMPHONE : ARMPHONE}</td>
-                                  <td className="sorting_1">{value.HOLD}</td>
-                                  <td className="sorting_1">{value.RELEASE}</td>
-                                  <td className="sorting_1">{value.IN_YARD}</td>
+                                  <td className="sorting_1">{value?.ARMPHONE ? value?.ARMPHONE : ARMPHONE}</td>
+                                  <td className="sorting_1">{value?.HOLD}</td>
+                                  <td className="sorting_1">{value?.RELEASE}</td>
+                                  <td className="sorting_1">{value?.IN_YARD}</td>
                                   <td className="sorting_1">
-                                    <div id={value.AGREEMENTNO} className='actionSet'>
+                                    <div id={value?.AGREEMENTNO} className='actionSet'>
                                       <div className='spinner'></div>
-                                    <select value={value.ACTION || 'empty'} 
-                                    onChange={(event)=>{addAction(event.target.value, value.AGREEMENTNO, value.FILENAME), 
-                                      actionLoader(value.AGREEMENTNO)}} 
+                                    <select value={value?.ACTION || 'empty'} 
+                                    onChange={(event)=>{addAction(event.target.value, value?.AGREEMENTNO, value?.FILENAME), 
+                                      actionLoader(value?.AGREEMENTNO)}} 
                                     name="" className='form-control' >
                                       <option value='empty'>select</option>
                                       <option value='Hold'>⏸ Hold</option>
