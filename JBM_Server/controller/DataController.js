@@ -341,7 +341,7 @@ route.get('/', async (req, res) => {
         const tempFilePath = path.join(uploadDir, fileKey);
         const writeStream = fs.createWriteStream(tempFilePath);
         fileStream.pipe(writeStream);
-        console.log(tempFilePath)
+        // console.log(tempFilePath)
 
         // Return a promise that resolves when the file is written
         return new Promise((resolve, reject) => {

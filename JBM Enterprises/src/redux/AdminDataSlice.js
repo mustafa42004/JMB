@@ -95,7 +95,7 @@ const handleDeleteBank = createAsyncThunk('handleDeleteBank', async(formData) =>
 
 const handleData = createAsyncThunk('handleData', async(formData) =>{
     const response = await axios.post(`${API_URL}/data`, formData, { headers : { 'Content-Type' : 'multipart/form-data' } });
-    // console.log(response.data)
+    console.log(response.data)
     if(response.data.status === 200) {
         // console.log("hello")
         socket.emit('upload', {success : true} )

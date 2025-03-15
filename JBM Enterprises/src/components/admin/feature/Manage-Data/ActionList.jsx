@@ -225,9 +225,9 @@ const ActionList = () => {
                                   <td className="sorting_1">
                                     <div id={value?.AGREEMENTNO} className='actionSet'>
                                       <div className='spinner'></div>
-                                    <select value={value.ACTION || 'empty'} 
+                                    <select value={value?.ACTION || 'empty'} 
                                     onChange={(event)=>{addAction(event.target.value, value.AGREEMENTNO, value.FILENAME), 
-                                      actionLoader(value.AGREEMENTNO)}} 
+                                      actionLoader(value?.AGREEMENTNO)}} 
                                     name="" className='form-control' >
                                       <option value='empty'>select</option>
                                       <option value='Hold'>⏸ Hold</option>

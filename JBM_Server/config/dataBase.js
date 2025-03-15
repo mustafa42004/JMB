@@ -1,10 +1,10 @@
 let mongoose = require("mongoose");
-// mongoose.connect("mongodb+srv://Sadiq53:ZX7t5iTyKPCNcMOE@cluster0.cunxumm.mongodb.net/JBM");
-mongoose.connect("mongodb+srv://sadiqaerozefcreations:sgyn4hoYIBiPNSpU@cluster0.nr3rc.mongodb.net/JBM", {
+mongoose.connect("mongodb+srv://mustafaaerozefcreations:9BNaUoFL3hEFgsR4@cluster0.priws.mongodb.net/JMB"), {
     useNewUrlParser: true,
     useUnifiedTopology: true,
     serverSelectionTimeoutMS: 30000,
-});
+};
+
 // mongoose.connect("mongodb://0.0.0.0:27017/assignment");
 
 mongoose.connection.on("connected", ()=>{

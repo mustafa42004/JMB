@@ -6,14 +6,31 @@ module.exports = (io) => {
     const path = require('path');
     const fs = require('fs');
     const xlsx = require('xlsx');
-    const csv = require('csv-parser');
-    const { exec } = require('child_process');
     require('dotenv').config(); 
-    const winston = require('winston')
-    require('dotenv').config();
-  const multerS3 = require('multer-s3');
   const multer = require('multer');
   const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+  const zlib = require('zlib');
+  const { Upload } = require('@aws-sdk/lib-storage'); // Import Upload
+  const redis = require('redis'); // Import Redis
+  const redisClient = redis.createClient({
+    url: 'redis://127.0.0.1:6379' // Use IPv4 address
+  });
+  
+  // Handle connection events
+  redisClient.on('connect', () => {
+    console.log('Connected to Redis');
+  });
+
+  redisClient.on('error', (err) => {
+    console.error('Redis error:', err);
+  });
+
+  // Ensure the client is connected before using it
+  async function ensureRedisClient() {
+    if (!redisClient.isOpen) {
+      await redisClient.connect();
+    }
+  }
   
   // ---------------------------------File Reading-----------------------------------------
   
@@ -24,20 +41,6 @@ module.exports = (io) => {
     const worksheet = workbook.Sheets[sheetName];
     const data = xlsx.utils.sheet_to_json(worksheet); // Converts to JSON format
     return data;
-  }
-  
-  // Function to read CSV files
-  function readCSVFile(filePath) {
-    return new Promise((resolve, reject) => {
-      const results = [];
-      fs.createReadStream(filePath)
-        .pipe(csv())
-        .on('data', (data) => results.push(data))
-        .on('end', () => {
-          resolve(results); // Return all data rows as an array of objects
-        })
-        .on('error', (error) => reject(error));
-    });
   }
   
   // ---------------------------------File Reading-----------------------------------------
@@ -63,99 +66,9 @@ module.exports = (io) => {
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
   }
-  
-  // Multer configuration for file storage
-  const storage = multerS3({
-    s3: s3,
-    bucket: 'jmb-enterprises-bucket',
-    // acl: 'public-read',
-    key: (req, file, cb) => {
-      // Generate a unique name for the file
-      const fileName = `${uuidv4()}${path.extname(file.originalname)}`;
-      cb(null, fileName);
-    }
-  });
-  
-  // Configure winston for logging (optional)
-  const logger = winston.createLogger({
-    level: 'info',
-    format: winston.format.json(),
-    transports: [
-      new winston.transports.Console(), // Log to console
-      new winston.transports.File({ filename: 'upload-errors.log' }) // Log errors to a file
-    ],
-  });
-  
-  // Multer instance with limits and file type filter
-  const upload = multer({
-    storage: storage,
-    limits: { fileSize: 100 * 1024 * 1024 }, // Limit to 10MB
-    fileFilter: (req, file, cb) => {
-      // Allow only .xlsx and .csv file types
-      // const allowedTypes = [
-      //   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // XLSX
-      //   'text/csv' // CSV
-      // ];
-  
-      // Log the incoming file type
-      // logger.info(`Incoming file type: ${file.mimetype} for file: ${file.originalname}`);
-  
-      cb(null, true);
-      // if (allowedTypes.includes(file.mimetype)) {
-      // } else {
-      //   logger.error(`Invalid file type: ${file.mimetype} for file: ${file.originalname}`);
-      //   cb(new Error('Invalid file type'), false);
-      // }
-    }
-  });
-  
+
   //-------------------------File Saving------------------------------------
   
-  //-------------------To add the FILENAME and ACTION property in the file using python-----------------
-  
-  
-  // Function to run Python script
-  function addPropertyUsingPython(filePath, filename, bank, pathToFunc) {
-    return new Promise((resolve, reject) => {
-      // Path to the Python script
-      const scriptPath = pathToFunc
-      console.log("I am File Path",scriptPath)
-      // Use double quotes around paths to handle spaces and special characters
-      const command = `python "${scriptPath}" "${filePath}" "${filename}" "${bank}"`;
-      
-      exec(command, (error, stdout, stderr) => {
-        if (error) {
-          console.error(`Error executing Python script: ${stderr}`);
-          return reject(`Error: ${stderr}`);
-        }
-        console.log(`Python script output: ${stdout}`);
-        resolve(stdout);
-      });
-    });
-  }
-  
-  //-------------------To add the FILENAME and ACTION property in the file using python-----------------
-  
-  //-------------------To Update the Action in the file using python-----------------
-  
-  // Function to run Python script
-  function runPythonScript(filePath, agreementNumber, actionStatus, actionTime, pathToFunc) {
-    return new Promise((resolve, reject) => {
-      const scriptPath = pathToFunc
-      console.log("I am File Path",scriptPath)
-      // Use double quotes around paths to handle spaces and special characters
-      const command = `python "${scriptPath}" "${filePath}" "${agreementNumber}" "${actionStatus}" "${actionTime}"`;
-      
-      exec(command, (error, stdout, stderr) => {
-        if (error) {
-          return reject(`Error: ${stderr}`);
-        }
-        resolve(stdout);
-      });
-    });
-  }
-  
-  //-------------------To Update the Action in the file using python-----------------
   
   async function downloadFileFromS3(fileKey) {
     const params = {
@@ -198,40 +111,30 @@ async function deleteFileFromS3(fileKey) {
 }
   // Function to upload the modified file back to S3 using putObject
   
-  async function uploadFileToS3( fileKey, filePath) {
+  async function uploadFileToS3(fileKey, filePath) {
     try {
-      const fileStream = fs.createReadStream(filePath);
-  
-      // Define the parameters for the upload
-      const uploadParams = {
-        Bucket: 'jmb-enterprises-bucket',
-        Key: fileKey,
-        Body: fileStream,
-      };
-  
-      // Upload file using PutObjectCommand
-      const data = await s3.send(new PutObjectCommand(uploadParams));
-      // console.log("File uploaded successfully:", data);
-      return data
+        // Create a read stream for the file
+        const fileStream = fs.createReadStream(filePath);
+        
+        // Define the parameters for the upload
+        const uploadParams = {
+            Bucket: 'jmb-enterprises-bucket',
+            Key: fileKey, // Append .gz to the file key for the compressed file
+            Body: fileStream, // Use the stream for the upload
+            ContentEncoding: 'gzip' // Set content encoding to gzip
+        };
+
+        // Use the Upload class to handle the upload
+        const upload = new Upload({
+            client: s3,
+            params: uploadParams,
+        });
+
+        await upload.done(); // Wait for the upload to complete
+        console.log("File uploaded successfully:", uploadParams.Key);
     } catch (err) {
-      console.error("Error uploading file:", err);
-    }
-  }
-  
-  // Function to upload updated JSON to S3
-  async function uploadJSONToS3(fileKey, jsonData) {
-    try {
-      const fileContent = JSON.stringify(jsonData, null, 2); // Convert JSON to string with indentation
-      const uploadParams = {
-        Bucket: 'jmb-enterprises-bucket',
-        Key: fileKey,
-        Body: fileContent,
-        ContentType: 'application/json' // Set content type to JSON
-      };
-      const data = await s3.send(new PutObjectCommand(uploadParams));
-      return data;
-    } catch (err) {
-      console.error("Error uploading JSON to S3:", err);
+        console.error("Error uploading file:", err);
+        throw new Error(`Error uploading file: ${err.message}`);
     }
   }
   
@@ -280,110 +183,188 @@ async function deleteFileFromS3(fileKey) {
       // console.log('FileStream received:', fileStream);
     });
   }
+
+  // Helper function to convert a stream to a buffer
+  const streamToBuffer = (stream) => {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        stream.on('data', (chunk) => chunks.push(chunk));
+        stream.on('end', () => resolve(Buffer.concat(chunks)));
+        stream.on('error', reject);
+    });
+  };
   
   
   // -------------------------ROUTING STARTS----------------------------------------------------
   
   // Main route for file upload
-  route.post("/", upload.any(), async (req, res) => {
-    if (req.files && req.files.length > 0) {
-      const { bank } = req.body;
-      const file = req.files[0];
-      const { originalname, key: fileKey, location: fileUrl } = file;
-      const uploaddate = new Date();
-  
-      // Formatting the date
-      const options = {
-        hour: 'numeric',
-        minute: 'numeric',
-        hour12: true,
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      };
-      const formattedDate = uploaddate.toLocaleString('en-US', options);
-  
-      // Object to save in database
-      const obj = {
-        bank: bank,
-        uploaddate: uploaddate,
-        formatdate: formattedDate,
-        file: {
-          name: originalname,
-          filekey: fileKey,
-          path: fileUrl
-        }
-      };
-  
-      try {
-        // Check if data with the same original file name already exists
-        const existingData = await dataModel.findOne({ 'file.name': originalname });
-  
-        if (!existingData) {
-          // Download the file from S3
-          const fileStream = await downloadFileFromS3(fileKey);
-  
-          // Save the file content temporarily
-          const tempFilePath = path.join(uploadDir, fileKey);
-          const writeStream = fs.createWriteStream(tempFilePath);
-          fileStream.pipe(writeStream);
-  
-          writeStream.on('finish', async () => {
-            // Read the XLSX data and convert it to JSON
-            let jsonData = readXLSXFile(tempFilePath);
-  
-            // Loop through each object in the JSON data and add required fields only if they don't already exist
-            jsonData = jsonData.map(item => ({
-              ...item,
-              FILENAME: item.FILENAME || originalname,  // Add FILENAME if not already present
-              BANK: item.BANK || bank,                 // Add BANK if not already present
-              HOLD: item.HOLD || "",                  // Add HOLD if not already present
-              RELEASE: item.RELEASE || "",            // Add RELEASE if not already present
-              IN_YARD: item.IN_YARD || "",            // Add IN_YARD if not already present
-              ACTION: item.ACTION || ""               // Add ACTION if not already present
-            }));
-  
-            // Run the Python script to modify the JSON data (if necessary)
-            // await addPropertyUsingPython(tempFilePath, originalname, bank, path.join(__dirname, '..', 'assets', 'scripts', 'update_xlsx.py'));
-  
-            // Upload the modified JSON data to S3
-            await uploadJSONToS3(fileKey, jsonData);
-  
-            // Save to database
-            const createdData = await dataModel.create(obj);
-  
-            // Read and return the updated file data
-            const finalFileData = {
-              _id: createdData._id,
-              name: obj.file.name,
-              path: obj.file.path,
-              uploaddate: obj.uploaddate,
-              formatdate: obj.formatdate,
-              filekey: obj.file.filekey,
-              bank_name: obj.bank,
-              data: jsonData, // Return the modified JSON data
-            };
-  
-            res.send({ status: 200, filedata: finalFileData });
-  
-            // Clean up temporary file after processing
-            fs.unlinkSync(tempFilePath);
-          });
-  
-          writeStream.on('error', (err) => {
-            console.error('Error writing file to local storage:', err);
-            res.status(500).send({ message: 'Error writing file to local storage' });
-          });
-        } else {
-          res.send({ status: 400, message: 'File already exists in database. Fields not updated.' });
-        }
-      } catch (error) {
-        console.error("Error saving file data:", error);
-        res.status(500).send("Internal server error.");
+  route.post("/", async (req, res) => {
+    // Use multer's memory storage to handle files manually
+    const upload = multer({ storage: multer.memoryStorage() }).any();
+    
+    upload(req, res, async (err) => {
+      if (err) {
+        return res.status(500).send({ message: 'Error uploading file' });
       }
-    } else {
-      res.status(400).send("No files uploaded.");
-    }
+      
+      if (req.files && req.files.length > 0) {
+        const { bank } = req.body;
+        const file = req.files[0];
+        const { originalname, buffer } = file; // Get the file buffer instead of S3 upload
+        const uploaddate = new Date();
+        
+        // Formatting the date
+        const options = {
+          hour: 'numeric',
+          minute: 'numeric',
+          hour12: true,
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        };
+        const formattedDate = uploaddate.toLocaleString('en-US', options);
+        
+        // Object to save in database
+        const obj = {
+          bank: bank,
+          uploaddate: uploaddate,
+          formatdate: formattedDate,
+          file: {
+            name: originalname,
+            buffer: buffer
+          }
+        };
+        
+        try {
+          // Check if data with the same original file name already exists in Redis
+          const cachedData = await redisClient.get(`file:${originalname}`); // Use a unique key
+          if (cachedData) {
+            return res.send({ status: 200, filedata: JSON.parse(cachedData) });
+          }
+
+          // Check if data with the same original file name already exists
+          const existingData = await dataModel.findOne({ 'file.name': originalname });
+          
+          if (!existingData) {
+            // Instead of uploading directly to S3, save the buffer to a temporary file
+            const tempFilePath = path.join(uploadDir, originalname);
+            fs.writeFileSync(tempFilePath, buffer); // Save the file buffer to a temporary file
+            
+            // Read the XLSX file content for modification
+            const jsonData = readXLSXFile(tempFilePath); // Use the readXLSXFile function to read the XLSX file
+            
+            // Modify each entry to include BANK and FILENAME headings
+            const modifiedData = jsonData.map(entry => ({
+              BANK: bank,
+              FILENAME: originalname,
+              HOLD: "",
+              RELEASE: "",
+              IN_YARD: "",
+              ACTION: "",
+              ...entry // Spread the existing entry properties
+            }));
+            
+            // Write the modified content back to the temporary file in JSON format
+            fs.writeFileSync(tempFilePath, JSON.stringify(modifiedData, null, 2), 'utf8');
+
+            // Create a gzip stream from the modified temporary file
+            const gzipStream = fs.createReadStream(tempFilePath).pipe(zlib.createGzip());
+
+            // Define the path for the compressed file without the original extension
+            const gzipFilePath = path.join(uploadDir, `${path.parse(originalname).name}.gz`); // Remove extension
+
+            // Create a write stream for the gzip file
+            const gzipWriteStream = fs.createWriteStream(gzipFilePath);
+
+            // Pipe the gzip stream to the write stream
+            gzipStream.pipe(gzipWriteStream);
+
+            gzipWriteStream.on('finish', async () => {
+              try {
+                // Generate a unique file name for the upload
+                const uniqueFileName = `${uuidv4()}.gz`; // Unique name for the gzip file
+
+                // Upload the compressed file to S3 using Upload
+                const uploadParams = {
+                  Bucket: 'jmb-enterprises-bucket',
+                  Key: uniqueFileName, // Use the unique name for the upload
+                  Body: fs.createReadStream(gzipFilePath), // Use a stream for the upload
+                  ContentEncoding: 'gzip' // Set content encoding to gzip
+                };
+
+                const upload = new Upload({
+                  client: s3,
+                  params: uploadParams,
+                });
+
+                await upload.done(); // Wait for the upload to complete
+
+                // Save to database with the original name, unique file key, and URL
+                const createdData = await dataModel.create({
+                  ...obj,
+                  file: {
+                    name: originalname,
+                    filekey: uniqueFileName,
+                    path: `https://jmb-enterprises-bucket.s3.us-west-2.amazonaws.com/${uniqueFileName}`
+                  }
+                });
+
+                // Cache the created data in Redis with a unique key
+                await redisClient.set(`file:${originalname}`, JSON.stringify(createdData));
+
+                // Read the file from S3 to send back to the client
+                const fileStream = await downloadFileFromS3(uniqueFileName); // Use the unique file key to download the file
+                
+                // Convert the stream to a buffer
+                const fileContentBuffer = await streamToBuffer(fileStream);
+                
+                // Decompress the gzip buffer if necessary
+                const decompressedBuffer = zlib.gunzipSync(fileContentBuffer);
+                
+                // Convert the decompressed buffer to a string
+                const fileContent = decompressedBuffer.toString('utf8');
+
+                // Read and return the updated file data
+                const finalFileData = {
+                  _id: createdData._id,
+                  name: createdData.file.name, // Use the original file name from createdData
+                  path: createdData.file.path, // Use the URL from createdData
+                  uploaddate: obj.uploaddate,
+                  formatdate: obj.formatdate,
+                  filekey: createdData.file.filekey, // Use the unique file key from createdData
+                  bank_name: obj.bank,
+                  data: JSON.parse(fileContent) // Include the JSON data in the 'filedata' property
+                };
+                
+                // Cache the file content in Redis with a unique key
+                await redisClient.set(`file:${uniqueFileName}`, fileContent);
+
+                res.send({ status: 200, filedata: finalFileData }); // Send the finalFileData in the response
+
+                // Clean up temporary files after processing
+                fs.unlinkSync(tempFilePath);
+                fs.unlinkSync(gzipFilePath); // Clean up the gzip file after uploading
+              } catch (err) {
+                console.error('Error uploading file:', err);
+                res.status(500).send({ message: 'Error uploading file' });
+              }
+            });
+
+            gzipWriteStream.on('error', (err) => {
+              console.error('Error writing gzip file:', err);
+              res.status(500).send({ message: 'Error writing gzip file' });
+            });
+          } else {
+            res.send({ status: 400, message: 'File already exists in database. Fields not updated.' });
+          }
+        } catch (error) {
+          console.error("Error saving file data:", error);
+          res.status(500).send("Internal server error.");
+        }
+      } else {
+        res.status(400).send("No files uploaded.");
+      }
+    });
   });  
   
   route.get('/', async (req, res) => {
@@ -400,13 +381,28 @@ async function deleteFileFromS3(fileKey) {
         const fileKey = fileData?.file?.filekey; // File key for S3
         const name = fileData?.file?.name; // Original file name
   
+        // Check Redis cache for file content using a unique key
+        await ensureRedisClient(); // Ensure the client is connected
+        const cachedFileContent = await redisClient.get(`file:${fileKey}`); // Use a unique key
+        if (cachedFileContent) {
+          return {
+            _id: fileData._id,
+            name: fileData.file.name,
+            path: fileData.file.path,
+            uploaddate: fileData.uploaddate,
+            formatdate: fileData.formatdate,
+            filekey: fileData.file.filekey,
+            bank_name: fileData.bank,
+            data: JSON.parse(cachedFileContent) // Use cached data
+          };
+        }
+
         try {
           // Download the file from S3 and pipe it to the temporary file
           const fileStream = await downloadFileFromS3(fileKey);
           const tempFilePath = path.join(uploadDir, `${fileKey}`);
-          console.log(`Saving file to: ${tempFilePath}, ${fileKey}`);
+          // console.log(`Saving file to: ${tempFilePath}, ${fileKey}`);
 
-          
           // Ensure the whole file is being written
           await downloadAndSaveFile(fileStream, tempFilePath);
   
@@ -418,12 +414,17 @@ async function deleteFileFromS3(fileKey) {
             throw new Error("Downloaded file is empty");
           }
   
-          // Read the JSON file content
-          const fileContent = JSON.parse(fs.readFileSync(tempFilePath, 'utf-8'));
+          // Decompress the gzip file
+          const decompressedData = fs.readFileSync(tempFilePath);
+          const jsonData = zlib.gunzipSync(decompressedData); // Decompress the data
+          const fileContent = JSON.parse(jsonData.toString('utf-8')); // Parse the JSON content
   
           // Clean up temporary file after reading
           fs.unlinkSync(tempFilePath);
   
+          // Cache the file content in Redis with a unique key
+          await redisClient.set(`file:${fileKey}`, JSON.stringify(fileContent));
+
           return {
             _id: fileData._id,
             name: fileData.file.name,
@@ -461,14 +462,13 @@ async function deleteFileFromS3(fileKey) {
   route.put("/", async (req, res) => {
     if (req.body?.data?.action) {
       const { fileName, agreementNumber, actionStatus, actionTime } = req.body?.data?.action;
-  
       try {
         // Find the file data by name
         const fileData = await dataModel.findOne({ "file.name": fileName });
         if (!fileData) {
           return res.status(404).send({ message: "File not found" });
         }
-  
+        
         // Get file details
         const fileKey = fileData?.file?.filekey; // S3 key for the file
         const filePath = path.join(uploadDir, fileKey); // Local path to save the file
@@ -476,22 +476,15 @@ async function deleteFileFromS3(fileKey) {
         // Download the file from S3
         const fileStream = await downloadFileFromS3(fileKey);
         const writeStream = fs.createWriteStream(filePath);
-  
+        
         fileStream.pipe(writeStream);
-  
+        
         writeStream.on("finish", async () => {
           try {
-            // Check if the file is in JSON format
-            const fileContent = fs.readFileSync(filePath, "utf8");
-            let jsonData;
-  
-            try {
-              jsonData = JSON.parse(fileContent); // Try parsing as JSON
-            } catch (err) {
-              console.error("File is not in JSON format:", err);
-              return res.status(400).send({ message: "Invalid file format" });
-            }
-            // console.log(jsonData.find(value ))
+            // Decompress the gzipped file
+            const decompressedData = fs.readFileSync(filePath);
+            const jsonData = JSON.parse(zlib.gunzipSync(decompressedData).toString('utf8')); // Decompress and parse JSON
+            
             // Find and update the agreement data in the JSON
             const agreementIndex = jsonData.findIndex(
               (item) => item.AGREEMENTNO == agreementNumber
@@ -506,16 +499,22 @@ async function deleteFileFromS3(fileKey) {
               'Release': 'RELEASE',
               'In Yard': 'IN_YARD'
             }
-  
+            
             jsonData[agreementIndex].ACTION = actionStatus;
             jsonData[agreementIndex][convertAction[actionStatus]] = actionTime;
-  
+            
             // Save the updated JSON data back to the file
-            fs.writeFileSync(filePath, JSON.stringify(jsonData, null, 2), "utf8");
-  
+            const updatedData = zlib.gzipSync(JSON.stringify(jsonData, null, 2)); // Compress the updated JSON data
+            fs.writeFileSync(filePath, updatedData); // Write the compressed data back to the file
+            
             // Upload the updated file back to S3
             await uploadFileToS3(fileKey, filePath);
-  
+            
+            await ensureRedisClient(); // Ensure Redis client is connected
+            
+            // After updating the file, update the cache
+            await redisClient.set(`file:${fileKey}`, JSON.stringify(jsonData)); // Ensure the correct key is used
+
             // Send success response
             res.send({
               status: 200,
@@ -553,6 +552,9 @@ async function deleteFileFromS3(fileKey) {
       const errors = [];
       const deletedIds = [];
   
+      // Ensure the Redis client is connected
+      await ensureRedisClient();
+  
       // Loop through each file ID
       for (const fileId of IDs) {
         try {
@@ -571,6 +573,9 @@ async function deleteFileFromS3(fileKey) {
   
           // Delete the file record from the database
           await dataModel.deleteOne({ _id: fileId });
+  
+          // Delete the file from Redis cache
+          await redisClient.del(fileKey);
   
           // Track successful deletions
           deletedIds.push(fileId);
@@ -598,3 +603,4 @@ async function deleteFileFromS3(fileKey) {
   
     return route;
   };
+
